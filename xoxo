@@ -1,7 +1,3 @@
---[[
-    RIAN CORE INTEGRATION
-    Refactored & Beautified
-]]--
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")

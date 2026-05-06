@@ -1,0 +1,189 @@
+--[[
+    RIAN CORE INTEGRATION
+    Refactored & Beautified
+]]--
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+local Camera = workspace.CurrentCamera
+
+--// Global Configuration
+getgenv().SilentAim       = false
+getgenv().ShowFOV         = false
+getgenv().TargetKnocked   = false
+getgenv().FOVRadius       = 100
+getgenv().SilentAimPart   = "Head"
+getgenv().NearestPart     = false
+getgenv().SilentPrediction = false 
+getgenv().PredictionAmount = 0.165   
+getgenv().SpreadValue     = 15
+
+local Whitelist = {}
+
+--// Gun System Integration
+local success, GunHandler = pcall(require, ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GunHandler"))
+
+--// Utility Functions
+local function GetTargetPart(player)
+    local character = player.Character
+    if not character then return nil end
+
+    if getgenv().NearestPart then
+        local bestPart = nil
+        local shortestDist = math.huge
+        local parts = {"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart"}
+
+        for _, partName in ipairs(parts) do
+            local part = character:FindFirstChild(partName)
+            if part then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                if onScreen then
+                    local mouseDist = (UserInputService:GetMouseLocation() - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
+                    if mouseDist < shortestDist then
+                        shortestDist = mouseDist
+                        bestPart = part
+                    end
+                end
+            end
+        end
+        return bestPart
+    end
+
+    return character:FindFirstChild(getgenv().SilentAimPart) or character:FindFirstChild("HumanoidRootPart")
+end
+
+local function GetSniperTarget()
+    local target, shortestDistance = nil, getgenv().FOVRadius
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and not Whitelist[player.UserId] then
+            local hitPart = GetTargetPart(player)
+            
+            if hitPart then
+                local humanoid = player.Character:FindFirstChild("Humanoid")
+                local bodyEffects = player.Character:FindFirstChild("BodyEffects")
+                local isKO = bodyEffects and bodyEffects:FindFirstChild("K.O") and bodyEffects["K.O"].Value
+                
+                if humanoid and humanoid.Health > 0 and (getgenv().TargetKnocked or not isKO) then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(hitPart.Position)
+                    if onScreen then
+                        local dist = (UserInputService:GetMouseLocation() - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
+                        if dist < shortestDistance then 
+                            shortestDistance = dist
+                            target = hitPart
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+
+--// Silent Aim Hook
+if success then
+    local oldShoot; oldShoot = hookfunction(rawget(GunHandler, "shoot"), function(args)
+        if getgenv().SilentAim and rawget(args, "Shooter") == LocalPlayer.Character then
+            local target = GetSniperTarget()
+            
+            if target then
+                local hitPos = target.Position
+                
+                -- Handle Prediction
+                if getgenv().SilentPrediction then
+                    hitPos = hitPos + (target.Velocity * getgenv().PredictionAmount)
+                end
+                
+                -- Handle Spread
+                local spreadScale = (getgenv().SpreadValue / 100) * 5
+                local offset = Vector3.new(
+                    math.random(-100, 100) / 100 * spreadScale,
+                    math.random(-100, 100) / 100 * spreadScale,
+                    math.random(-100, 100) / 100 * spreadScale
+                )
+                
+                local finalPos = hitPos + offset
+                local muzzlePos = args["Muzzle"] and args["Muzzle"].WorldPosition or Camera.CFrame.Position
+                
+                args["AimPosition"] = finalPos
+                args["Direction"] = (finalPos - muzzlePos).Unit
+                args["Hit"] = target
+                
+                return oldShoot(args)
+            end
+        end
+        return oldShoot(args)
+    end)
+end
+
+--// UI Construction
+local MainGui = Instance.new("ScreenGui", game.CoreGui)
+local MainFrame = Instance.new("Frame", MainGui)
+local UIStroke = Instance.new("UIStroke", MainFrame)
+local UICorner = Instance.new("UICorner", MainFrame)
+
+MainFrame.Name = "RianMain"
+MainFrame.Size = UDim2.new(0, 500, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -250, 0.5, -210)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Visible = false
+
+UICorner.CornerRadius = UDim.new(0, 10)
+UIStroke.Color = Color3.fromRGB(255, 20, 147)
+UIStroke.Thickness = 2
+
+--// Sidebar Setup
+local Sidebar = Instance.new("Frame", MainFrame)
+Sidebar.Size = UDim2.new(0, 120, 1, 0)
+Sidebar.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+Instance.new("UICorner", Sidebar).CornerRadius = UDim.new(0, 10)
+
+local Title = Instance.new("TextLabel", Sidebar)
+Title.Size = UDim2.new(1, 0, 0, 40)
+Title.Text = "/RIAN"
+Title.TextColor3 = Color3.fromRGB(255, 20, 147)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 14
+Title.BackgroundTransparency = 1
+
+--// Page Management Logic
+local Container = Instance.new("Frame", MainFrame)
+Container.Size = UDim2.new(1, -130, 1, -20)
+Container.Position = UDim2.new(0, 125, 0, 10)
+Container.BackgroundTransparency = 1
+
+local Pages = {}
+local function CreatePage(name)
+    local Page = Instance.new("ScrollingFrame", Container)
+    Page.Size = UDim2.new(1, 0, 1, 0)
+    Page.BackgroundTransparency = 1
+    Page.Visible = false
+    Page.ScrollBarThickness = 2
+    Page.CanvasSize = UDim2.new(0, 0, 0, 0)
+    
+    local Layout = Instance.new("UIListLayout", Page)
+    Layout.Padding = UDim.new(0, 5)
+    Layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        Page.CanvasSize = UDim2.new(0, 0, 0, Layout.AbsoluteContentSize.Y + 10)
+    end)
+    
+    Pages[name] = Page
+    return Page
+end
+
+local function SwitchPage(name)
+    for _, p in pairs(Pages) do p.Visible = false end
+    if Pages[name] then Pages[name].Visible = true end
+end
+
+--// Initialization Finish
+MainFrame.Visible = true
